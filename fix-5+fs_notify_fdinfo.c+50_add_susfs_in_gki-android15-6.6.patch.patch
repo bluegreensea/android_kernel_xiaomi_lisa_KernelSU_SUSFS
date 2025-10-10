@@ -1,0 +1,11 @@
+--- a/50_add_susfs_in_gki-android15-6.6.patch	2025-08-25 16:22:46.546968236 +0800
++++ b/50_add_susfs_in_gki-android15-6.6.patch	2025-08-25 22:53:59.452252008 +0800
+@@ -1142,7 +1142,7 @@
+  	struct fsnotify_group *group = f->private_data;
+  	struct fsnotify_mark *mark;
+  
+- 	fsnotify_group_lock(group);
++ 	mutex_lock(&group->mark_mutex);
+  	list_for_each_entry(mark, &group->marks_list, g_list) {
+ +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+ +		show(m, mark, f);

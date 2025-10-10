@@ -1,0 +1,13 @@
+--- a/50_add_susfs_in_gki-android15-6.6.patch
++++ b/50_add_susfs_in_gki-android15-6.6.patch
+@@ -1936,9 +1936,9 @@
+ +#else
+  	ANDROID_KABI_RESERVE(4);
+ +#endif
++ 	void *data;
+  } __randomize_layout;
+  
+- static inline struct mnt_idmap *mnt_idmap(const struct vfsmount *mnt)
+ diff --git a/kernel/kallsyms.c b/kernel/kallsyms.c
+ index 18edd57b5fe8..5719b0ca344d 100644
+ --- a/kernel/kallsyms.c

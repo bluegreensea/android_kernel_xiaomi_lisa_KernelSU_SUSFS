@@ -1,0 +1,14 @@
+--- a/50_add_susfs_in_gki-android15-6.6.patch	2025-08-28 22:47:25.723972398 +0800
++++ b/50_add_susfs_in_gki-android15-6.6.patch	2025-08-30 22:15:00.669909824 +0800
+@@ -1355,9 +1355,9 @@
+ --- a/fs/proc/task_mmu.c
+ +++ b/fs/proc/task_mmu.c
+ @@ -23,6 +23,9 @@
+- #include <linux/uaccess.h>
+  #include <linux/pkeys.h>
+- #include <trace/hooks/mm.h>
++ #include <linux/mm_inline.h>
++ #include <linux/ctype.h>
+ +#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+ +#include <linux/susfs_def.h>
+ +#endif

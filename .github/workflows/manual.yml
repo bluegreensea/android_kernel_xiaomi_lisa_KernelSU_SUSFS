@@ -6,35 +6,55 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
 
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          path: common
 
       - name: Update and install required packages
         run: |
           sudo apt update
-          sudo apt install -y libc6-dev clang flex bison libssl-dev bc python3 zip unzip lld llvm p7zip-full
+          sudo apt install -y libc6-dev clang flex bison libssl-dev bc python3 zip unzip lld llvm p7zip-full ccache jq
+      - name: Set up ccache
+        run: |
+          ccache --version
+          ccache --max-size=2G
+          ccache --set-config=compression=true
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+      - name: Restore ccache from cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ github.sha }}
+          restore-keys: |
+            ccache-
       - name: Prepare magiskboot
         run: |
           mkdir -p $GITHUB_WORKSPACE/output
           cd $GITHUB_WORKSPACE/output
-          curl -L -o magiskboot.7z https://github.com/xiaoxindada/magiskboot_ndk_on_linux/releases/download/Magiskboot-27006-69/magiskboot.7z
+          curl -L -o magiskboot.7z "https://github.com/xiaoxindada/magisk_bins_ndk/releases/download/magisk_bins-29001-cf09f1c1061138652a435cba3e675508730b0464/magisk_bins.7z"
           7z x magiskboot.7z
-          cp ./out/x86/magiskboot .
+          cp ./native/out/x86_64/magiskboot .
           chmod +x magiskboot
           rm -rf ./out
       - name: Prepare boot.img
         run: |
           cd $GITHUB_WORKSPACE/output
-          curl -L -o boot.img "https://github.com/likkai/android_kernel_xiaomi_sm8350/releases/download/ori-0.1.0/boot.img"
+          export lineageos_ver=$(curl -LfsG "https://download.lineageos.org/api/v1/lisa/nightly/0" | jq -r '.response[0].filename' | cut -d- -f3)   
+          echo "RELEASE_TAG=$lineageos_ver" >> $GITHUB_ENV                                                                    
+          curl -L -o boot.img "https://mirrorbits.lineageos.org/full/lisa/$lineageos_ver/boot.img"
       - name: Prepare required toolchains
         run: |
           mkdir -p $GITHUB_WORKSPACE/toolchains
           cd $GITHUB_WORKSPACE/toolchains
-          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1
+          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --branch=main-kernel-build-2024 --depth=1
       - name: Remove unnecessary tools
         run: |
           cd $GITHUB_WORKSPACE/toolchains/linux-x86
@@ -49,15 +69,194 @@ jobs:
           done
           # Export path
           export PATH="$GITHUB_WORKSPACE/toolchains/linux-x86/$latest_clang/bin:$PATH"
-      - name: Install KernelSU
+      - name: Clone Other Dependencies
         run: |
-          cd $GITHUB_WORKSPACE
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          cd "$GITHUB_WORKSPACE"
+          SUSFS_BRANCH="gki-android15-6.6"
+          echo "Using branch for SUSFS: $SUSFS_BRANCH"
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+          echo "SUSFS_REPO=https://gitlab.com/simonpunk/susfs4ksu" >> $GITHUB_ENV
+          cd susfs4ksu
+          echo "SUSFS_SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "SUSFS_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+          cd ..
+          git clone https://github.com/WildPlusKernel/kernel_patches.git
+      - name: Apply ptrace patch
+        run: |
+          cd "$GITHUB_WORKSPACE/common"
+          patch -p1 -F 3 < "../kernel_patches/gki_ptrace.patch"
+      - name: Add KernelSU
+        run: |
+          cd "$GITHUB_WORKSPACE/common"
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          echo "KSU_REPO=https://github.com/KernelSU-Next/KernelSU-Next" >> $GITHUB_ENV
+          cd KernelSU-Next
+          echo "KSU_SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "KSU_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+          git revert -n d9239343e697ff497ea0037e242303e9b66e9a7e # kernel: auto patch struct seccomp to include filter_count
+          cd ..
+      - name: Apply SUSFS Patches
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          
+          # Copy SUSFS patches
+          cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common
+          cd common
+          
+          echo -e "\033[0;32minfo: fix fs/Makefile patch\e[0m"
+          patch -p1 --forward < fix-1+fs_Makefile+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/exec.c patch\e[0m"
+          patch -p1 --forward < fix-2+fs_exec.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/namei.c patch\e[0m"
+          patch -p1 --forward < fix-3+fs_namei.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/namespace.c patch\e[0m"
+          patch -p1 --forward < fix-4+fs_namespace.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/notify/fdinfo.c patch\e[0m"
+          patch -p1 --forward < fix-5+fs_notify_fdinfo.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/open.c patch\e[0m"
+          patch -p1 --forward < fix-6+fs_open.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/proc/bootconfig.c patch\e[0m"
+          patch -p1 --forward < fix-7+fs_proc_bootconfig.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/proc/fd.c patch\e[0m"
+          patch -p1 --forward < fix-8+fs_proc_fd.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/proc/task_mmu.c patch\e[0m"
+          patch -p1 --forward < fix-9+fs_proc_task_mmu.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/readdir.c patch\e[0m"
+          patch -p1 --forward < fix-10+fs_readdir.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix fs/stat.c patch\e[0m"
+          patch -p1 --forward < fix-11+fs_stat.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix include/linux/mount.h patch\e[0m"
+          patch -p1 --forward < fix-12+include_linux_mount.h+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix security/selinux/avc.c patch\e[0m"
+          patch -p1 --forward < fix-13+security_selinux_avc.c+50_add_susfs_in_gki-android15-6.6.patch.patch
+          echo -e "\033[0;32minfo: fix patch end\e[0m"
+          
+          patch -p1 --forward < 50_add_susfs_in_gki-android15-6.6.patch
+          cp ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          
+          echo "Applying SUSFS patches..."
+          cd ./KernelSU-Next
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
+          
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_apk_sign.c.patch ./
+          patch -p1 --forward < fix_apk_sign.c.patch
+          
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_core_hook.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
+          
+          # cp ../../kernel_patches/wild/susfs_fix_patches/v1.5.9/fix_rules.c.patch ./
+          # patch -p1 --forward < fix_rules.c.patch
+          
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_sucompat.c.patch ./
+          patch -p1 --forward < fix_sucompat.c.patch
+          
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_kernel_compat.c.patch ./
+          patch -p1 --forward < fix_kernel_compat.c.patch
+      - name: Apply Hooks Patches
+        run: |
+          cd "$GITHUB_WORKSPACE/common"
+          
+          echo "Applying hooks..."
+          cp ../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
+          patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
+      - name: Apply KernelSU Symbol Fix Patch
+        run: |
+          cd "$GITHUB_WORKSPACE/common/KernelSU-Next/kernel"
+          sed -i 's|\(atomic_set(&current->seccomp.filter_count, 0);\)|// \1|' core_hook.c
+      # - name: Apply Module Symbol Version Fix Patch
+      #   run: |
+      #     cd "$GITHUB_WORKSPACE/common/kernel"
+      #     #sed -i 's/pr_warn("%s: disagrees about version of symbol %s\\n"/pr_warn("%s: disagrees about version of symbol %s, but ignore...\\n"/' module.c
+      #     sed -i '/bad_version:/{:a;n;/return 0;/{s/return 0;/return 1;/;b};ba}' module.c
+      - name: Apply Hide Stuff Patches
+        run: |
+          cd "$GITHUB_WORKSPACE/common"
+          cp ../kernel_patches/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
+      - name: Add Configuration Settings
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          
+          defconfig="./common/arch/arm64/configs/lisa_defconfig"
+          
+          echo "Applying kernel configurations one by one..."
+          
+          # KernelSU Core Configuration
+          echo "CONFIG_KSU=y" >> "$defconfig"
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> "$defconfig"
+          
+          # Mountify Support
+          echo "CONFIG_TMPFS_XATTR=y" >> "$defconfig"
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$defconfig"
+          
+          # Networking Configuration
+          echo "CONFIG_IP_NF_TARGET_TTL=y" >> "$defconfig"
+          echo "CONFIG_IP6_NF_TARGET_HL=y" >> "$defconfig"
+          echo "CONFIG_IP6_NF_MATCH_HL=y" >> "$defconfig"
+          
+          # BBR TCP Congestion Control
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> "$defconfig"
+          echo "CONFIG_TCP_CONG_BBR=y" >> "$defconfig"
+          echo "CONFIG_NET_SCH_FQ=y" >> "$defconfig"
+          echo "CONFIG_TCP_CONG_BIC=n" >> "$defconfig"
+          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> "$defconfig"
+          echo "CONFIG_TCP_CONG_HTCP=n" >> "$defconfig"
+          
+          # IPSet support
+          echo "CONFIG_IP_SET=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_MAX=256" >> "$defconfig"
+          echo "CONFIG_IP_SET_BITMAP_IP=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_BITMAP_PORT=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_HASH_IP=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_HASH_IPPORT=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_HASH_NET=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_HASH_NETNET=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_HASH_NETPORT=y" >> "$defconfig"
+          echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> "$defconfig"
+          # SUSFS Configuration
+          echo "CONFIG_KSU_SUSFS=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$defconfig"
+          
+          # SUSFS Auto Mount Features
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> "$defconfig"
+          
+          # SUSFS Advanced Features
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=n" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$defconfig"
+          
+          # SUSFS Debugging and Security
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "$defconfig"
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> "$defconfig"
+          
+          # Build Optimization Configuration
+          echo "CONFIG_LTO_CLANG_THIN=y" >> "$defconfig"
+          echo "CONFIG_LTO_CLANG=y" >> "$defconfig"
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "$defconfig"
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=n" >> "$defconfig"
+          
+          # Remove check_defconfig
+          sed -i 's/check_defconfig//' ./common/build.config.gki
       - name: Build Kernel
         run: |
+          cd $GITHUB_WORKSPACE/common
           chmod +x build.sh
           ./build.sh
-          cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/output
+          cp $GITHUB_WORKSPACE/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/output
+          ccache --show-stats
+          df -H .
       - name: Modify boot.img
         run: |
           cd $GITHUB_WORKSPACE/output
@@ -65,8 +264,19 @@ jobs:
           rm -rf kernel
           mv Image kernel
           ./magiskboot repack boot.img
+          7z a new-boot.7z new-boot.img
       - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
           name: new-boot
           path: /home/runner/work/android_kernel_xiaomi_sm8350/android_kernel_xiaomi_sm8350/output/new-boot.img
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: b${{ env.RELEASE_TAG }}
+          body: |
+            Boot image for LineageOS build ${{ env.RELEASE_TAG }}
+            KernelSU Next [${{ env.KSU_SHORT_SHA }}](${{ env.KSU_REPO }}/commit/${{ env.KSU_SHA }}) + SUSFS [${{ env.SUSFS_SHORT_SHA }}](${{ env.SUSFS_REPO }}/commit/${{ env.SUSFS_SHA }})
+          files: |
+            /home/runner/work/android_kernel_xiaomi_sm8350/android_kernel_xiaomi_sm8350/output/new-boot.img
+            /home/runner/work/android_kernel_xiaomi_sm8350/android_kernel_xiaomi_sm8350/output/new-boot.7z

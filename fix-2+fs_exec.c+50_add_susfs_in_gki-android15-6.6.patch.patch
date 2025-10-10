@@ -1,0 +1,33 @@
+--- a/50_add_susfs_in_gki-android15-6.6.patch
++++ b/50_add_susfs_in_gki-android15-6.6.patch
+@@ -60,7 +60,7 @@
+ --- a/fs/exec.c
+ +++ b/fs/exec.c
+ @@ -69,6 +69,9 @@
+- #include <linux/page_size_compat.h>
++ #include <linux/vmalloc.h>
+  
+  #include <linux/uaccess.h>
+ +#ifdef CONFIG_KSU_SUSFS_SUS_SU
+@@ -70,7 +70,7 @@
+  #include <asm/tlb.h>
+  
+ @@ -1901,6 +1904,13 @@ static int bprm_execve(struct linux_binprm *bprm,
+- 	return retval;
++ 	return ret;
+  }
+  
+ +#ifdef CONFIG_KSU_SUSFS_SUS_SU
+@@ -80,9 +80,9 @@
+ +				void *envp, int *flags);
+ +#endif
+ +
+- static int do_execveat_common(int fd, struct filename *filename,
+- 			      struct user_arg_ptr argv,
+- 			      struct user_arg_ptr envp,
++ /*
++  * sys_execve() executes a new program.
++  */
+ @@ -1912,6 +1922,18 @@ static int do_execveat_common(int fd, struct filename *filename,
+  	if (IS_ERR(filename))
+  		return PTR_ERR(filename);

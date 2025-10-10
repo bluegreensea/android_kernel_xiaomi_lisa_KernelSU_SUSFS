@@ -1,0 +1,91 @@
+--- a/50_add_susfs_in_gki-android15-6.6.patch
++++ b/50_add_susfs_in_gki-android15-6.6.patch
+@@ -661,18 +661,16 @@
+ index 2d0231797d0d..d36c8e7639ec 100644
+ --- a/fs/namespace.c
+ +++ b/fs/namespace.c
+-@@ -32,12 +32,38 @@
++@@ -32,10 +32,36 @@
++ #include <uapi/linux/mount.h>
+  #include <linux/fs_context.h>
+  #include <linux/shmem_fs.h>
+- #include <linux/mnt_idmapping.h>
+ +#if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_TRY_UMOUNT)
+ +#include <linux/susfs_def.h>
+ +#endif
+  
+  #include "pnode.h"
+  #include "internal.h"
+- #include <trace/hooks/blk.h>
+- #include <trace/hooks/fs.h>
+  
+ +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+ +extern bool susfs_is_current_ksu_domain(void);
+@@ -698,7 +696,7 @@
+ +#endif
+ +
+  /* Maximum number of mounts in a mount namespace */
+- static unsigned int sysctl_mount_max __read_mostly = 100000;
++ unsigned int sysctl_mount_max __read_mostly = 100000;
+  
+ @@ -138,6 +164,20 @@ static int mnt_alloc_id(struct mount *mnt)
+  
+@@ -768,7 +766,7 @@
+  	ida_free(&mnt_group_ida, mnt->mnt_group_id);
+  	mnt->mnt_group_id = 0;
+  }
+-@@ -196,6 +268,112 @@ int mnt_get_count(struct mount *mnt)
++@@ -196,6 +268,110 @@ int mnt_get_count(struct mount *mnt)
+  #endif
+  }
+  
+@@ -811,7 +809,6 @@
+ +		INIT_HLIST_NODE(&mnt->mnt_mp_list);
+ +		INIT_LIST_HEAD(&mnt->mnt_umounting);
+ +		INIT_HLIST_HEAD(&mnt->mnt_stuck_children);
+-+		mnt->mnt.mnt_idmap = &nop_mnt_idmap;
+ +	}
+ +	return mnt;
+ +
+@@ -864,7 +861,6 @@
+ +		INIT_HLIST_NODE(&mnt->mnt_mp_list);
+ +		INIT_LIST_HEAD(&mnt->mnt_umounting);
+ +		INIT_HLIST_HEAD(&mnt->mnt_stuck_children);
+-+		mnt->mnt.mnt_idmap = &nop_mnt_idmap;
+ +	}
+ +	return mnt;
+ +
+@@ -882,9 +878,9 @@
+  {
+  	struct mount *mnt = kmem_cache_zalloc(mnt_cache, GFP_KERNEL);
+ @@ -223,6 +401,10 @@ static struct mount *alloc_vfsmnt(const char *name)
+- 		mnt->mnt_count = 1;
+  		mnt->mnt_writers = 0;
+  #endif
++ 		mnt->mnt.data = NULL;
+ +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+ +		// Make sure mnt->mnt.susfs_mnt_id_backup is initialized every time.
+ +		mnt->mnt.susfs_mnt_id_backup = 0;
+@@ -893,8 +889,8 @@
+  		INIT_HLIST_NODE(&mnt->mnt_hash);
+  		INIT_LIST_HEAD(&mnt->mnt_child);
+ @@ -1085,7 +1267,25 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
+- 	if (!fc->root)
+  		return ERR_PTR(-EINVAL);
++ 	sb = fc->root->d_sb;
+  
+ +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+ +	// - We do not check anymore if boot-completed stage is triggered
+@@ -1032,9 +1028,9 @@
+  }
+  
+ @@ -5060,3 +5337,38 @@ static int __init init_fs_namespace_sysctls(void)
+- fs_initcall(init_fs_namespace_sysctls);
+- 
+- #endif /* CONFIG_SYSCTL */
++ 	.install	= mntns_install,
++ 	.owner		= mntns_owner,
++ };
+ +
+ +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+ +/* Reorder the mnt_id after all sus mounts are umounted during ksu_handle_setuid() */

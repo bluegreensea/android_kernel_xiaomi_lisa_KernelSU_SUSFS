@@ -1,0 +1,51 @@
+diff --color -Naur a/50_add_susfs_in_kernel-5.4.patch b/50_add_susfs_in_kernel-5.4.patch
+--- a/50_add_susfs_in_kernel-5.4.patch	2025-06-18 23:32:39.722261330 +0800
++++ b/50_add_susfs_in_kernel-5.4.patch	2025-06-19 00:24:44.601974793 +0800
+@@ -966,30 +966,6 @@
+  	ovl_path_real(root_dentry, &path);
+  
+  	err = vfs_statfs(&path, buf);
+-diff --git a/fs/proc/bootconfig.c b/fs/proc/bootconfig.c
+-index 2e244ada1f97..792e1cb04b11 100644
+---- a/fs/proc/bootconfig.c
+-+++ b/fs/proc/bootconfig.c
+-@@ -12,8 +12,19 @@
+- 
+- static char *saved_boot_config;
+- 
+-+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+-+extern int susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
+-+#endif
+-+
+- static int boot_config_proc_show(struct seq_file *m, void *v)
+- {
+-+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+-+	if (saved_boot_config) {
+-+		if (!susfs_spoof_cmdline_or_bootconfig(m)) {
+-+			return 0;
+-+		}
+-+	}
+-+#endif
+- 	if (saved_boot_config)
+- 		seq_puts(m, saved_boot_config);
+- 	return 0;
+ diff --git a/fs/proc/fd.c b/fs/proc/fd.c
+ index 6b634c0a9b6e..1bf6ca564248 100644
+ --- a/fs/proc/fd.c
+diff --color -Naur a/fs/proc/fd.c b/fs/proc/fd.c
+--- a/fs/proc/fd.c	2025-06-18 23:37:02.587076376 +0800
++++ b/fs/proc/fd.c	2025-06-19 00:23:02.945671900 +0800
+@@ -53,9 +53,10 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	seq_printf(m, "pos:\t%lli\nflags:\t0%o\nmnt_id:\t%i\n",
+-		   (long long)file->f_pos, f_flags,
+-		   real_mount(file->f_path.mnt)->mnt_id);
++	seq_printf(m, "pos:\t%lli\nflags:\t0%o\nmnt_id:\t%i\nino:\t%lu\n",
++		   (long long)file->f_pos, f_flags,
++		   real_mount(file->f_path.mnt)->mnt_id,
++		   file_inode(file)->i_ino);
+ 
+ 	show_fd_locks(m, file, files);
+ 	if (seq_has_overflowed(m))
