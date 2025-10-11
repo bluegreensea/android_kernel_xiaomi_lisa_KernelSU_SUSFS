@@ -92,16 +92,20 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/common"
           patch -p1 -F 3 < "../kernel_patches/gki_ptrace.patch"
-      # - name: Add KernelSU
-      #   run: |
-      #     cd "$GITHUB_WORKSPACE/common"
-      #     curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-      #     echo "KSU_REPO=https://github.com/KernelSU-Next/KernelSU-Next" >> $GITHUB_ENV
-      #     cd KernelSU-Next
-      #     echo "KSU_SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-      #     echo "KSU_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
-      #     # git revert -n d9239343e697ff497ea0037e242303e9b66e9a7e # kernel: auto patch struct seccomp to include filter_count
-      #     cd ..
+      - name: Add KernelSU
+        run: |
+          cd "$GITHUB_WORKSPACE/common"
+          mkdir ./KernelSU-Next
+          mv drivers/kernelsu KernelSU-Next/kernel
+          cd drivers/
+          ln -s ../KernelSU-Next/kernel kernelsu
+          # curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          # echo "KSU_REPO=https://github.com/KernelSU-Next/KernelSU-Next" >> $GITHUB_ENV
+          # cd KernelSU-Next
+          # echo "KSU_SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          # echo "KSU_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+          # # git revert -n d9239343e697ff497ea0037e242303e9b66e9a7e # kernel: auto patch struct seccomp to include filter_count
+          # cd ..
       - name: Apply SUSFS Patches
         run: |
           cd "$GITHUB_WORKSPACE"
