@@ -83,6 +83,11 @@ jobs:
           echo "SUSFS_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
           cd ..
           git clone https://github.com/WildPlusKernel/kernel_patches.git
+      - name: Revert KernelSU Hooks Changes
+        run: |
+          cd "$GITHUB_WORKSPACE/common"
+          git fetch origin a780ad19a84a0f8b3fe644ffa748c1985e5c7006 --depth=2
+          git revert -n a780ad19a84a0f8b3fe644ffa748c1985e5c7006 # drivers: Add KernelSU hooks
       - name: Apply ptrace patch
         run: |
           cd "$GITHUB_WORKSPACE/common"
@@ -156,13 +161,13 @@ jobs:
           
           cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_kernel_compat.c.patch ./
           patch -p1 --forward < fix_kernel_compat.c.patch
-      # - name: Apply Hooks Patches
-      #   run: |
-      #     cd "$GITHUB_WORKSPACE/common"
-      #     
-      #     echo "Applying hooks..."
-      #     cp ../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
-      #     patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
+      - name: Apply Hooks Patches
+        run: |
+          cd "$GITHUB_WORKSPACE/common"
+          
+          echo "Applying hooks..."
+          cp ../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
+          patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
       # - name: Apply KernelSU Symbol Fix Patch
       #   run: |
       #     cd "$GITHUB_WORKSPACE/common/KernelSU-Next/kernel"
