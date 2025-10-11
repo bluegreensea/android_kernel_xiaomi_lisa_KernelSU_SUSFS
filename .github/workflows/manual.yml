@@ -16,8 +16,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+      - name: Checkout kernel source repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'NSR-Resources/android_kernel_xiaomi_lisa'
+          fetch-depth: 1
           path: common
-
+      - name: Merge files
+        run: |
+          cd $GITHUB_WORKSPACE/common
+          find ../ -maxdepth 1 -type f -exec cp -v {} ./ \;
       - name: Update and install required packages
         run: |
           sudo apt update
@@ -44,12 +52,6 @@ jobs:
           cp ./native/out/x86_64/magiskboot .
           chmod +x magiskboot
           rm -rf ./out
-      - name: Prepare boot.img
-        run: |
-          cd $GITHUB_WORKSPACE/output
-          export lineageos_ver=$(curl -LfsG "https://download.lineageos.org/api/v1/lisa/nightly/0" | jq -r '.response[0].filename' | cut -d- -f3)   
-          echo "RELEASE_TAG=$lineageos_ver" >> $GITHUB_ENV                                                                    
-          curl -L -o boot.img "https://mirrorbits.lineageos.org/full/lisa/$lineageos_ver/boot.img"
       - name: Prepare required toolchains
         run: |
           mkdir -p $GITHUB_WORKSPACE/toolchains
@@ -85,16 +87,16 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/common"
           patch -p1 -F 3 < "../kernel_patches/gki_ptrace.patch"
-      - name: Add KernelSU
-        run: |
-          cd "$GITHUB_WORKSPACE/common"
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-          echo "KSU_REPO=https://github.com/KernelSU-Next/KernelSU-Next" >> $GITHUB_ENV
-          cd KernelSU-Next
-          echo "KSU_SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          echo "KSU_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
-          # git revert -n d9239343e697ff497ea0037e242303e9b66e9a7e # kernel: auto patch struct seccomp to include filter_count
-          cd ..
+      # - name: Add KernelSU
+      #   run: |
+      #     cd "$GITHUB_WORKSPACE/common"
+      #     curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+      #     echo "KSU_REPO=https://github.com/KernelSU-Next/KernelSU-Next" >> $GITHUB_ENV
+      #     cd KernelSU-Next
+      #     echo "KSU_SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+      #     echo "KSU_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+      #     # git revert -n d9239343e697ff497ea0037e242303e9b66e9a7e # kernel: auto patch struct seccomp to include filter_count
+      #     cd ..
       - name: Apply SUSFS Patches
         run: |
           cd "$GITHUB_WORKSPACE"
@@ -154,17 +156,17 @@ jobs:
           
           cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_kernel_compat.c.patch ./
           patch -p1 --forward < fix_kernel_compat.c.patch
-      - name: Apply Hooks Patches
-        run: |
-          cd "$GITHUB_WORKSPACE/common"
-          
-          echo "Applying hooks..."
-          cp ../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
-          patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
-      - name: Apply KernelSU Symbol Fix Patch
-        run: |
-          cd "$GITHUB_WORKSPACE/common/KernelSU-Next/kernel"
-          # sed -i 's|\(atomic_set(&current->seccomp.filter_count, 0);\)|// \1|' core_hook.c
+      # - name: Apply Hooks Patches
+      #   run: |
+      #     cd "$GITHUB_WORKSPACE/common"
+      #     
+      #     echo "Applying hooks..."
+      #     cp ../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
+      #     patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
+      # - name: Apply KernelSU Symbol Fix Patch
+      #   run: |
+      #     cd "$GITHUB_WORKSPACE/common/KernelSU-Next/kernel"
+      #     # sed -i 's|\(atomic_set(&current->seccomp.filter_count, 0);\)|// \1|' core_hook.c
       # - name: Apply Module Symbol Version Fix Patch
       #   run: |
       #     cd "$GITHUB_WORKSPACE/common/kernel"
@@ -254,30 +256,27 @@ jobs:
           cd $GITHUB_WORKSPACE/common
           chmod +x build.sh
           ./build.sh
+          echo "RELEASE_TAG=$(make -j$(nproc --all) O=out kernelrelease)" >> $GITHUB_ENV
           cp $GITHUB_WORKSPACE/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/output
           ccache --show-stats
           df -H .
-      - name: Modify boot.img
+      - name: Pack up
         run: |
           cd $GITHUB_WORKSPACE/output
-          ./magiskboot unpack boot.img
-          rm -rf kernel
           mv Image kernel
-          ./magiskboot repack boot.img
-          7z a new-boot.7z new-boot.img
+          7z a kernel.7z kernel
       - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
           name: new-boot
-          path: output/new-boot.img
+          path: output/kernel
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          target_commitish: ${{ github.sha }}
-          tag_name: b${{ env.RELEASE_TAG }}-b
+          tag_name: ${{ env.RELEASE_TAG }}
           body: |
-            Boot image for LineageOS build ${{ env.RELEASE_TAG }}
-            backport filter_count + KernelSU Next [${{ env.KSU_SHORT_SHA }}](${{ env.KSU_REPO }}/commit/${{ env.KSU_SHA }}) + SUSFS [${{ env.SUSFS_SHORT_SHA }}](${{ env.SUSFS_REPO }}/commit/${{ env.SUSFS_SHA }})
+            Kernel ${{ env.RELEASE_TAG }}
+            KernelSU Next + SUSFS [${{ env.SUSFS_SHORT_SHA }}](${{ env.SUSFS_REPO }}/commit/${{ env.SUSFS_SHA }})
           files: |
-            output/new-boot.img
-            output/new-boot.7z
+            output/kernel
+            output/kernel.7z
