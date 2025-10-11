@@ -93,7 +93,7 @@ jobs:
           cd KernelSU-Next
           echo "KSU_SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           echo "KSU_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
-          git revert -n d9239343e697ff497ea0037e242303e9b66e9a7e # kernel: auto patch struct seccomp to include filter_count
+          # git revert -n d9239343e697ff497ea0037e242303e9b66e9a7e # kernel: auto patch struct seccomp to include filter_count
           cd ..
       - name: Apply SUSFS Patches
         run: |
@@ -164,7 +164,7 @@ jobs:
       - name: Apply KernelSU Symbol Fix Patch
         run: |
           cd "$GITHUB_WORKSPACE/common/KernelSU-Next/kernel"
-          sed -i 's|\(atomic_set(&current->seccomp.filter_count, 0);\)|// \1|' core_hook.c
+          # sed -i 's|\(atomic_set(&current->seccomp.filter_count, 0);\)|// \1|' core_hook.c
       # - name: Apply Module Symbol Version Fix Patch
       #   run: |
       #     cd "$GITHUB_WORKSPACE/common/kernel"
@@ -274,10 +274,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           target_commitish: ${{ github.sha }}
-          tag_name: b${{ env.RELEASE_TAG }}
+          tag_name: b${{ env.RELEASE_TAG }}-b
           body: |
             Boot image for LineageOS build ${{ env.RELEASE_TAG }}
-            upstream + KernelSU Next [${{ env.KSU_SHORT_SHA }}](${{ env.KSU_REPO }}/commit/${{ env.KSU_SHA }}) + SUSFS [${{ env.SUSFS_SHORT_SHA }}](${{ env.SUSFS_REPO }}/commit/${{ env.SUSFS_SHA }})
+            backport filter_count + KernelSU Next [${{ env.KSU_SHORT_SHA }}](${{ env.KSU_REPO }}/commit/${{ env.KSU_SHA }}) + SUSFS [${{ env.SUSFS_SHORT_SHA }}](${{ env.SUSFS_REPO }}/commit/${{ env.SUSFS_SHA }})
           files: |
             output/new-boot.img
             output/new-boot.7z
