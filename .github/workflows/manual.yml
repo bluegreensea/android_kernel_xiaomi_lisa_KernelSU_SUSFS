@@ -1,5 +1,8 @@
 name: Build Kernel
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
 
@@ -285,7 +288,7 @@ jobs:
       - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
-          name: new-boot
+          name: kernel
           path: output/kernel
       - name: Upload Release
         uses: softprops/action-gh-release@v2
