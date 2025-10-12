@@ -271,7 +271,9 @@ jobs:
           cd $GITHUB_WORKSPACE/common
           chmod +x build.sh
           ./build.sh
-          echo "RELEASE_TAG=$(make -j$(nproc --all) O=out kernelrelease)" >> $GITHUB_ENV
+          export version=$(make -j$(nproc --all) O=out kernelrelease)
+          export version=$(echo ${version/-dirty/-susfs-g${{ env.SUSFS_SHORT_SHA }}})
+          echo "RELEASE_TAG=\"$version\"" >> $GITHUB_ENV
           cp $GITHUB_WORKSPACE/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/output
           ccache --show-stats
           df -H .
