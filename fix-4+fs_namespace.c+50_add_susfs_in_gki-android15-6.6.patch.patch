@@ -1,7 +1,7 @@
 --- a/50_add_susfs_in_gki-android15-6.6.patch
 +++ b/50_add_susfs_in_gki-android15-6.6.patch
 @@ -661,18 +661,16 @@
- index 2d0231797d0d..d36c8e7639ec 100644
+ index 2d0231797d0d..48da0346dea2 100644
  --- a/fs/namespace.c
  +++ b/fs/namespace.c
 -@@ -32,12 +32,38 @@
@@ -69,17 +69,17 @@
 @@ -893,8 +889,8 @@
   		INIT_HLIST_NODE(&mnt->mnt_hash);
   		INIT_LIST_HEAD(&mnt->mnt_child);
- @@ -1085,7 +1267,25 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
+ @@ -1085,7 +1267,18 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
 - 	if (!fc->root)
   		return ERR_PTR(-EINVAL);
 + 	sb = fc->root->d_sb;
   
  +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
- +	// - We do not check anymore if boot-completed stage is triggered
-@@ -1032,9 +1028,9 @@
+ +	// We keep checking for ksu process
+@@ -1016,9 +1012,9 @@
   }
   
- @@ -5060,3 +5337,38 @@ static int __init init_fs_namespace_sysctls(void)
+ @@ -5060,3 +5321,42 @@ static int __init init_fs_namespace_sysctls(void)
 - fs_initcall(init_fs_namespace_sysctls);
 - 
 - #endif /* CONFIG_SYSCTL */
