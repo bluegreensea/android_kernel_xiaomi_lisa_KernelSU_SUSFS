@@ -15,30 +15,43 @@ jobs:
       CCACHE_HARDLINK: "true"
 
     steps:
+      - name: Set CONFIG Environment Variable
+        run: |
+          # Set CONFIG
+          CONFIG="$GITHUB_WORKSPACE"
+
+          # Set CONFIG as an environment variable for future steps
+          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
       - name: Checkout kernel source repository
         uses: actions/checkout@v4
         with:
           repository: 'NSR-Resources/android_kernel_xiaomi_lisa'
           fetch-depth: 1
           path: common
+
       - name: Merge files
         run: |
           cd $GITHUB_WORKSPACE/common
           find ../ -maxdepth 1 -type f -exec cp -v {} ./ \;
+
       - name: Update and install required packages
         run: |
           sudo apt update
           sudo apt install -y libc6-dev clang gcc-multilib flex bison libssl-dev bc python3 zip unzip lld llvm p7zip-full ccache jq
+
       - name: Set up ccache
         run: |
           ccache --version
           ccache --max-size=2G
           ccache --set-config=compression=true
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+
       - name: Restore ccache from cache
         uses: actions/cache@v4
         with:
@@ -46,6 +59,7 @@ jobs:
           key: ccache-${{ github.sha }}
           restore-keys: |
             ccache-
+
       - name: Prepare magiskboot
         run: |
           mkdir -p $GITHUB_WORKSPACE/output
@@ -55,12 +69,14 @@ jobs:
           cp ./native/out/x86_64/magiskboot .
           chmod +x magiskboot
           rm -rf ./out
+
       - name: Prepare required toolchains
         run: |
           mkdir -p $GITHUB_WORKSPACE/toolchains
           cd $GITHUB_WORKSPACE/toolchains
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --branch=main-kernel-build-2024 --depth=1
           git clone https://android.googlesource.com/platform/system/libufdt --branch=main --depth=1
+
       - name: Remove unnecessary tools
         run: |
           cd $GITHUB_WORKSPACE/toolchains/linux-x86
@@ -75,6 +91,7 @@ jobs:
           done
           # Export path
           export PATH="$GITHUB_WORKSPACE/toolchains/linux-x86/$latest_clang/bin:$PATH"
+
       - name: Clone Other Dependencies
         run: |
           cd "$GITHUB_WORKSPACE"
@@ -87,15 +104,18 @@ jobs:
           echo "SUSFS_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
           cd ..
           git clone https://github.com/WildPlusKernel/kernel_patches.git
+
       - name: Revert KernelSU Hooks Changes
         run: |
           cd "$GITHUB_WORKSPACE/common"
           git fetch origin a780ad19a84a0f8b3fe644ffa748c1985e5c7006 --depth=2
           git revert -n a780ad19a84a0f8b3fe644ffa748c1985e5c7006 # drivers: Add KernelSU hooks
+
       - name: Apply ptrace patch
         run: |
           cd "$GITHUB_WORKSPACE/common"
           patch -p1 -F 3 < "../kernel_patches/gki_ptrace.patch"
+
       - name: Add KernelSU
         run: |
           cd "$GITHUB_WORKSPACE/common"
@@ -110,6 +130,7 @@ jobs:
           # echo "KSU_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
           # # git revert -n d9239343e697ff497ea0037e242303e9b66e9a7e # kernel: auto patch struct seccomp to include filter_count
           # cd ..
+
       - name: Apply SUSFS Patches
         run: |
           cd "$GITHUB_WORKSPACE"
@@ -169,6 +190,7 @@ jobs:
           
           cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_kernel_compat.c.patch ./
           patch -p1 --forward < fix_kernel_compat.c.patch
+
       - name: Apply Hooks Patches
         run: |
           cd "$GITHUB_WORKSPACE/common"
@@ -176,6 +198,7 @@ jobs:
           echo "Applying hooks..."
           cp ../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
           patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
+
       # - name: Apply KernelSU Symbol Fix Patch
       #   run: |
       #     cd "$GITHUB_WORKSPACE/common/KernelSU-Next/kernel"
@@ -185,90 +208,126 @@ jobs:
       #     cd "$GITHUB_WORKSPACE/common/kernel"
       #     #sed -i 's/pr_warn("%s: disagrees about version of symbol %s\\n"/pr_warn("%s: disagrees about version of symbol %s, but ignore...\\n"/' module.c
       #     sed -i '/bad_version:/{:a;n;/return 0;/{s/return 0;/return 1;/;b};ba}' module.c
+
       - name: Apply Hide Stuff Patches
         run: |
           cd "$GITHUB_WORKSPACE/common"
           cp ../kernel_patches/69_hide_stuff.patch ./
           patch -p1 -F 3 < 69_hide_stuff.patch
-      - name: Add Configuration Settings
+
+      - name: Set Kernel Configuration Variables
         run: |
-          cd "$GITHUB_WORKSPACE"
-          
-          defconfig="./common/arch/arm64/configs/lisa_defconfig"
-          
-          echo "Applying kernel configurations one by one..."
-          
-          # KernelSU Core Configuration
-          echo "CONFIG_KSU=y" >> "$defconfig"
-          echo "CONFIG_KSU_KPROBES_HOOK=n" >> "$defconfig"
-          
-          # Mountify Support
-          echo "CONFIG_TMPFS_XATTR=y" >> "$defconfig"
-          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$defconfig"
-          
-          # Networking Configuration
-          echo "CONFIG_IP_NF_TARGET_TTL=y" >> "$defconfig"
-          echo "CONFIG_IP6_NF_TARGET_HL=y" >> "$defconfig"
-          echo "CONFIG_IP6_NF_MATCH_HL=y" >> "$defconfig"
-          
-          # BBR TCP Congestion Control
-          echo "CONFIG_TCP_CONG_ADVANCED=y" >> "$defconfig"
-          echo "CONFIG_TCP_CONG_BBR=y" >> "$defconfig"
-          echo "CONFIG_NET_SCH_FQ=y" >> "$defconfig"
-          echo "CONFIG_TCP_CONG_BIC=n" >> "$defconfig"
-          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> "$defconfig"
-          echo "CONFIG_TCP_CONG_HTCP=n" >> "$defconfig"
-          
-          # IPSet support
-          echo "CONFIG_IP_SET=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_MAX=256" >> "$defconfig"
-          echo "CONFIG_IP_SET_BITMAP_IP=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_BITMAP_PORT=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_HASH_IP=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_HASH_IPPORT=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_HASH_NET=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_HASH_NETNET=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_HASH_NETPORT=y" >> "$defconfig"
-          echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> "$defconfig"
-          # SUSFS Configuration
-          echo "CONFIG_KSU_SUSFS=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$defconfig"
-          
-          # SUSFS Auto Mount Features
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> "$defconfig"
-          
-          # SUSFS Advanced Features
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=n" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$defconfig"
-          
-          # SUSFS Debugging and Security
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "$defconfig"
-          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> "$defconfig"
-          
-          # Build Optimization Configuration
-          echo "CONFIG_LTO_CLANG_THIN=y" >> "$defconfig"
-          echo "CONFIG_LTO_CLANG=y" >> "$defconfig"
-          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "$defconfig"
-          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=n" >> "$defconfig"
+          cd "$CONFIG"
+          echo "Initializing kernel configuration..."
+          echo "DEFCONFIG=./common/arch/arm64/configs/lisa_defconfig" >> $GITHUB_ENV
           
           # Remove check_defconfig
           sed -i 's/check_defconfig//' ./common/build.config.gki
+
+      - name: Configure KernelSU Core
+        run: |
+          cd "$CONFIG"
+          # KernelSU Configuration
+          echo "# KernelSU Configuration" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> "${{ env.DEFCONFIG }}"
+
+      - name: Configure Mountify Support
+        run: |
+          cd "$CONFIG"
+          # Mountify Support
+          echo "# Mountify Support" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_TMPFS_XATTR=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "${{ env.DEFCONFIG }}"
+
+      - name: Configure Networking
+        run: |
+          cd "$CONFIG"
+          # Networking Configuration
+          echo "# Networking Configuration" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_NF_TARGET_TTL=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP6_NF_TARGET_HL=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP6_NF_MATCH_HL=y" >> "${{ env.DEFCONFIG }}"
+
+      - name: Configure TCP Congestion Control
+        run: |
+          cd "$CONFIG"
+          # BBR TCP Congestion Control
+          echo "# BBR TCP Congestion Control" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_TCP_CONG_BBR=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_NET_SCH_FQ=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_TCP_CONG_BIC=n" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_TCP_CONG_HTCP=n" >> "${{ env.DEFCONFIG }}"
+
+      - name: Configure IPSet Support
+        run: |
+          cd "$CONFIG"
+          # IPSet support
+          echo "# IPSet Support" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_MAX=65534" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_BITMAP_IP=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_BITMAP_PORT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_IP=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_IPMARK=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_IPPORT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_IPMAC=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_MAC=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_NETPORTNET=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_NET=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_NETNET=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_NETPORT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_IP_SET_LIST_SET=y" >> "${{ env.DEFCONFIG }}"
+
+      - name: Configure SUSFS
+        run: |
+          cd "$CONFIG"
+          # SUSFS Configuration
+          echo "# SUSFS Configuration" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS=y" >> "${{ env.DEFCONFIG }}"
+          echo "#CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> "${{ env.DEFCONFIG }}"
+
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> "${{ env.DEFCONFIG }}"
+
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=n" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_SUS_MAP=n" >> "${{ env.DEFCONFIG }}"
+
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> "${{ env.DEFCONFIG }}"
+
+      - name: Configure Build Optimization
+        run: |
+          cd "$CONFIG"
+          # Build Optimization Configuration
+          echo "# Build Optimization Configuration" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_LTO_CLANG_THIN=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_LTO_CLANG=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=n" >> "${{ env.DEFCONFIG }}"
+          echo "CONFIG_OPTIMIZE_INLINING=y" >> "${{ env.DEFCONFIG }}"
+
       - name: Prepare Build
         run: |
           cd $GITHUB_WORKSPACE/common/scripts
           cp $GITHUB_WORKSPACE/toolchains/libufdt/utils/src/mkdtboimg.py mkdtboimg.py
           sed -i 's|python2|python3|' Makefile.lib
+
       - name: Build Kernel
         run: |
           cd $GITHUB_WORKSPACE/common
@@ -280,16 +339,19 @@ jobs:
           cp $GITHUB_WORKSPACE/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/output
           ccache --show-stats
           df -H .
+
       - name: Pack up
         run: |
           cd $GITHUB_WORKSPACE/output
           mv Image kernel
           7z a kernel.7z kernel
+
       - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
           name: kernel
           path: output/kernel
+
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
